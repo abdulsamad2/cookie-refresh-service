@@ -2,7 +2,6 @@ import { chromium, devices } from "playwright";
 import fs from "fs/promises";
 import path from "path";
 import { BrowserFingerprint } from "./browserFingerprint.js";
-import { simulateHumanBehavior, DEFAULT_CONFIG } from "./humanBehavior.js";
 
 // Device settings
 const iphone13 = devices["iPhone 13"];
@@ -11,10 +10,10 @@ const iphone13 = devices["iPhone 13"];
 const COOKIES_FILE = "cookies.json";
 const CONFIG = {
   COOKIE_REFRESH_INTERVAL: 30 * 60 * 1000, // 20 minutes (standardized timing)
-  PAGE_TIMEOUT: 120000, // 2 minutes timeout for page operations
+  PAGE_TIMEOUT: 45000,
   MAX_RETRIES: 5,
   RETRY_DELAY: 10000,
-  CHALLENGE_TIMEOUT: 30000, // 30 seconds timeout for challenge detection
+  CHALLENGE_TIMEOUT: 10000,
   COOKIE_REFRESH_TIMEOUT: 1 * 60 * 1000, // 2 minutes timeout for cookie refresh
   MAX_REFRESH_RETRIES: 10, // Increased retries for enhanced retry system
   BROWSER_RESTART_TIMEOUT: 1 * 60 * 1000, // 2 minutes - when to restart browser
@@ -133,11 +132,8 @@ function enhancedFingerprint() {
 }
 
 /**
- * Legacy mobile interactions function - DEPRECATED
- * Replaced with sophisticated humanBehavior.js module
- * Keeping for reference but no longer used
+ * Simulate various mobile interactions to appear more human-like
  */
-/*
 async function simulateMobileInteractions(page) {
   try {
     // Get viewport size
@@ -187,7 +183,6 @@ async function simulateMobileInteractions(page) {
     console.warn("Error during mobile interaction simulation:", error.message);
   }
 }
-*/
 
 /**
  * Initialize the browser with enhanced fingerprinting
@@ -215,7 +210,7 @@ async function initBrowser(proxy) {
           "--disable-infobars",
           "--disable-notifications",
         ],
-        timeout: 180000, // 2 minutes timeout for browser launch
+        timeout: 60000,
       };
 
       if (proxy && typeof proxy === "object" && proxy.proxy) {
@@ -300,14 +295,7 @@ async function initBrowser(proxy) {
     // Create a new page and simulate human behavior
     const page = await context.newPage();
     await page.waitForTimeout(1000 + Math.random() * 2000);
-    
-    // Use sophisticated human behavior simulation
-    await simulateHumanBehavior(page, {
-      ...DEFAULT_CONFIG,
-      enableAdvancedInteractions: true,
-      sessionVariabilityFactor: 0.3,
-      simulateNetworkDelay: true
-    });
+    await simulateMobileInteractions(page);
 
     return { context, fingerprint: enhancedFingerprint(), page, browser };
   } catch (error) {
@@ -794,17 +782,8 @@ async function refreshCookies(eventId, proxy = null) {
             await handleTicketmasterChallenge(page);
           }
 
-          // Simulate human behavior with Ticketmaster-specific configuration
-          await simulateHumanBehavior(page, {
-            ...DEFAULT_CONFIG,
-            initialDelay: 3000,
-            initialDelayVariance: 5000,
-            minMouseMoves: 5,
-            maxMouseMoves: 12,
-            enableAdvancedInteractions: !isChallengePresent, // Avoid interactions during challenges
-            sessionVariabilityFactor: 0.4,
-            simulateNetworkDelay: true
-          });
+          // Simulate human behavior
+          await simulateMobileInteractions(page);
 
           // Wait for cookies to be set
           await page.waitForTimeout(2000);
@@ -996,7 +975,7 @@ async function generateAlternativeEventId(originalEventId) {
 
     // Try to import Event model and get a different random event
     try {
-      const { Event } = await import("../models/eventModel.js");
+      const { Event } = await import("./models/index.js");
 
       // Get multiple random active events, excluding the original
       const alternativeEvents = await Event.aggregate([
@@ -1058,7 +1037,7 @@ async function getAlternativeProxy(currentProxy) {
 
     // Try to get a fresh proxy from the proxy management system
     try {
-      const { GetProxy } = await import("../proxy.js");
+      const { GetProxy } = await import("./helpers/proxy.js");
 
       // Get a new proxy from the proxy pool
       const proxyData = await GetProxy();
@@ -1152,4 +1131,5 @@ export {
   getRealisticIphoneUserAgent,
   generateAlternativeEventId,
   getAlternativeProxy,
+  simulateMobileInteractions,
 };
