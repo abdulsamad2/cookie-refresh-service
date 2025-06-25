@@ -1,22 +1,32 @@
-import { chromium, devices } from "playwright";
+import puppeteer from "puppeteer";
 import fs from "fs/promises";
 import path from "path";
 import { BrowserFingerprint } from "./browserFingerprint.js";
 
 // Device settings
-const iphone13 = devices["iPhone 13"];
+const iphone13 = {
+  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
+  viewport: {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+    isLandscape: false,
+  },
+};
 
 // Constants
 const COOKIES_FILE = "cookies.json";
 const CONFIG = {
-  COOKIE_REFRESH_INTERVAL: 30 * 60 * 1000, // 20 minutes (standardized timing)
+  COOKIE_REFRESH_INTERVAL: 30 * 60 * 1000, // 30 minutes (standardized timing)
   PAGE_TIMEOUT: 45000,
   MAX_RETRIES: 5,
   RETRY_DELAY: 10000,
   CHALLENGE_TIMEOUT: 10000,
-  COOKIE_REFRESH_TIMEOUT: 1 * 60 * 1000, // 2 minutes timeout for cookie refresh
+  COOKIE_REFRESH_TIMEOUT: 2 * 60 * 1000, // 2 minutes timeout for cookie refresh
   MAX_REFRESH_RETRIES: 10, // Increased retries for enhanced retry system
-  BROWSER_RESTART_TIMEOUT: 1 * 60 * 1000, // 2 minutes - when to restart browser
+  BROWSER_RESTART_TIMEOUT: 2 * 60 * 1000, // 2 minutes - when to restart browser
 };
 
 let browser = null;
@@ -137,8 +147,8 @@ function enhancedFingerprint() {
 async function simulateMobileInteractions(page) {
   try {
     // Get viewport size
-    const viewportSize = page.viewportSize();
-    if (!viewportSize) return;
+    const viewport = await page.viewport();
+    if (!viewport) return;
 
     // Random scroll amounts
     const scrollOptions = [
@@ -163,21 +173,19 @@ async function simulateMobileInteractions(page) {
           top: y,
           behavior: "smooth",
         });
-      }, scrollY);
-
-      // Random pause between scrolls (500-2000ms)
-      await page.waitForTimeout(500 + Math.floor(Math.random() * 1500));
+      }, scrollY);      // Random pause between scrolls (500-2000ms)
+      await new Promise(resolve => setTimeout(resolve, 500 + Math.floor(Math.random() * 1500)));
     }
 
     // Simulate random taps/clicks (1-2 times)
     const tapCount = 1 + Math.floor(Math.random() * 2);
     for (let i = 0; i < tapCount; i++) {
       // Random position within viewport
-      const x = 50 + Math.floor(Math.random() * (viewportSize.width - 100));
-      const y = 150 + Math.floor(Math.random() * (viewportSize.height - 300));
+      const x = 50 + Math.floor(Math.random() * (viewport.width - 100));
+      const y = 150 + Math.floor(Math.random() * (viewport.height - 300));
 
       await page.mouse.click(x, y);
-      await page.waitForTimeout(500 + Math.floor(Math.random() * 1000));
+      await new Promise(resolve => setTimeout(resolve, 500 + Math.floor(Math.random() * 1000)));
     }
   } catch (error) {
     console.warn("Error during mobile interaction simulation:", error.message);
@@ -188,17 +196,12 @@ async function simulateMobileInteractions(page) {
  * Initialize the browser with enhanced fingerprinting
  */
 async function initBrowser(proxy) {
-  let context = null;
-
   try {
     // Get randomized human-like properties
-    const location = getRandomLocation();
-
-    // For persisting browser sessions, use same browser if possible
-    if (!browser || !browser.isConnected()) {
-      // Launch options
+    const location = getRandomLocation();    // For persisting browser sessions, use same browser if possible
+    if (!browser || !browser.isConnected()) {// Launch options
       const launchOptions = {
-        headless: true,
+        headless: 'new', // Set to false for debugging, true for production
         args: [
           "--disable-blink-features=AutomationControlled",
           "--disable-features=IsolateOrigins,site-per-process",
@@ -209,38 +212,52 @@ async function initBrowser(proxy) {
           "--no-default-browser-check",
           "--disable-infobars",
           "--disable-notifications",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--disable-background-timer-throttling",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-renderer-backgrounding",
         ],
+        defaultViewport: null,
         timeout: 60000,
-      };
-
-      if (proxy && typeof proxy === "object" && proxy.proxy) {
+      };      if (proxy && typeof proxy === "object" && (proxy.proxy || (proxy.host && proxy.port))) {
         try {
-          // Extract hostname and port from proxy string
-          const proxyString = proxy.proxy;
+          let hostname, port;
+          
+          if (proxy.proxy) {
+            // Extract hostname and port from proxy string
+            const proxyString = proxy.proxy;
 
-          // Ensure proxyString is a string before using string methods
-          if (typeof proxyString !== "string") {
-            throw new Error(
-              "Invalid proxy format: proxy.proxy must be a string, got " +
-                typeof proxyString
-            );
+            // Ensure proxyString is a string before using string methods
+            if (typeof proxyString !== "string") {
+              throw new Error(
+                "Invalid proxy format: proxy.proxy must be a string, got " +
+                  typeof proxyString
+              );
+            }
+
+            // Check if proxy string is in correct format (host:port)
+            if (!proxyString.includes(":")) {
+              throw new Error("Invalid proxy format: " + proxyString);
+            }
+
+            [hostname, port] = proxyString.split(":");
+          } else if (proxy.host && proxy.port) {
+            // Extract hostname and port from separate properties
+            hostname = proxy.host;
+            port = proxy.port.toString();
+          } else {
+            throw new Error("Invalid proxy configuration: missing host/port");
           }
 
-          // Check if proxy string is in correct format (host:port)
-          if (!proxyString.includes(":")) {
-            throw new Error("Invalid proxy format: " + proxyString);
+          const portNum = parseInt(port) || 80;          launchOptions.args.push(`--proxy-server=http://${hostname}:${portNum}`);
+
+          console.log(`Configuring browser with proxy: ${hostname}:${portNum}`);
+          if (proxy.username && proxy.password) {
+            console.log(`Proxy authentication will be configured with username: ${proxy.username}`);
+          } else {
+            console.warn(`Proxy configured but no authentication credentials provided`);
           }
-
-          const [hostname, portStr] = proxyString.split(":");
-          const port = parseInt(portStr) || 80;
-
-          launchOptions.proxy = {
-            server: `http://${hostname}:${port}`,
-            username: proxy.username,
-            password: proxy.password,
-          };
-
-          console.log(`Configuring browser with proxy: ${hostname}:${port}`);
         } catch (error) {
           console.warn(
             "Invalid proxy configuration, launching without proxy:",
@@ -250,60 +267,107 @@ async function initBrowser(proxy) {
       }
 
       // Launch browser
-      browser = await chromium.launch(launchOptions);
+      browser = await puppeteer.launch(launchOptions);
+    }    // Create new page with enhanced fingerprinting
+    const page = await browser.newPage();    // Configure proxy authentication if proxy credentials are provided
+    if (proxy && proxy.username && proxy.password) {
+      console.log(`Setting up proxy authentication for user: ${proxy.username}`);
+      try {
+        await page.authenticate({
+          username: proxy.username,
+          password: proxy.password,
+        });
+        console.log(`Proxy authentication configured successfully`);
+      } catch (authError) {
+        console.error(`Failed to configure proxy authentication: ${authError.message}`);
+        throw new Error(`Proxy authentication failed: ${authError.message}`);
+      }
+    } else if (proxy) {
+      console.warn(`Proxy configured but missing authentication credentials - this may cause auth errors`);
     }
 
-    // Create new context with enhanced fingerprinting
-    context = await browser.newContext({
-      ...iphone13,
-      userAgent: getRealisticIphoneUserAgent(),
-      locale: location.locale,
-      colorScheme: ["dark", "light"][Math.floor(Math.random() * 2)],
-      timezoneId: location.timezone,
-      geolocation: {
-        latitude: location.latitude,
-        longitude: location.longitude,
-        accuracy: 100 * Math.random() + 50,
-      },
-      permissions: ["geolocation", "notifications", "microphone", "camera"],
+    // Set user agent
+    await page.setUserAgent(getRealisticIphoneUserAgent());
+
+    // Set viewport to iPhone 13
+    await page.setViewport({
+      width: [375, 390, 414][Math.floor(Math.random() * 3)],
+      height: [667, 736, 812, 844][Math.floor(Math.random() * 4)],
       deviceScaleFactor: 2 + Math.random() * 0.5,
-      hasTouch: true,
       isMobile: true,
-      javaScriptEnabled: true,
-      acceptDownloads: true,
-      ignoreHTTPSErrors: true,
-      bypassCSP: true,
-      extraHTTPHeaders: {
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-        "Accept-Language": `${location.locale},en;q=0.9`,
-        "Accept-Encoding": "gzip, deflate, br",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        DNT: Math.random() > 0.5 ? "1" : "0",
-        "Upgrade-Insecure-Requests": "1",
-        Pragma: "no-cache",
-      },
-      viewport: {
-        width: [375, 390, 414][Math.floor(Math.random() * 3)],
-        height: [667, 736, 812, 844][Math.floor(Math.random() * 4)],
-      },
+      hasTouch: true,
+      isLandscape: false,
     });
 
-    // Create a new page and simulate human behavior
-    const page = await context.newPage();
-    await page.waitForTimeout(1000 + Math.random() * 2000);
-    await simulateMobileInteractions(page);
+    // Set extra HTTP headers
+    await page.setExtraHTTPHeaders({
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+      "Accept-Language": `${location.locale},en;q=0.9`,
+      "Accept-Encoding": "gzip, deflate, br",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1",
+      DNT: Math.random() > 0.5 ? "1" : "0",
+      "Upgrade-Insecure-Requests": "1",
+      Pragma: "no-cache",
+    });
 
-    return { context, fingerprint: enhancedFingerprint(), page, browser };
+    // Set geolocation
+    await page.setGeolocation({
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracy: 100 * Math.random() + 50,
+    });
+
+    // Set timezone
+    await page.emulateTimezone(location.timezone);
+
+    // Set locale
+    await page.emulateMediaFeatures([
+      { name: "prefers-color-scheme", value: ["dark", "light"][Math.floor(Math.random() * 2)] }
+    ]);
+
+    // Grant permissions
+    const context = browser.defaultBrowserContext();
+    await context.overridePermissions("https://www.ticketmaster.com", [
+      "geolocation",
+      "notifications",
+      "microphone",
+      "camera",
+    ]);    // Add script to override webdriver detection
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+      
+      // Remove traces of automation
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    });    // Add waitForTimeout method to page if it doesn't exist
+    if (!page.waitForTimeout) {
+      page.waitForTimeout = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    try {
+      await page.waitForTimeout(1000 + Math.random() * 2000);
+      await simulateMobileInteractions(page);
+    } catch (simulationError) {
+      console.warn("Error during initial simulation, continuing:", simulationError.message);
+    }    return { 
+      context: { 
+        cookies: async () => await page.cookies(),
+        addCookies: async (cookies) => await page.setCookie(...cookies),
+        close: async () => await safeClosePage(page)
+      }, 
+      fingerprint: enhancedFingerprint(), 
+      page, 
+      browser 
+    };
   } catch (error) {
     console.error("Error initializing browser:", error.message);
-
-    // Cleanup on error
-    if (context) await context.close().catch(() => {});
-
     throw error;
   }
 }
@@ -325,7 +389,7 @@ async function handleTicketmasterChallenge(page) {
 
     if (challengePresent) {
       console.log("Detected Ticketmaster challenge, attempting resolution...");
-      await page.waitForTimeout(1000 + Math.random() * 1000);
+      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
 
       try {
         const viewportSize = page.viewportSize();
@@ -371,11 +435,10 @@ async function handleTicketmasterChallenge(page) {
       if (!buttonClicked) {
         console.warn(
           "Could not find challenge button, continuing without resolution"
-        );
-        return false;
+        );        return false;
       }
 
-      await page.waitForTimeout(2000);
+      await new Promise(resolve => setTimeout(resolve, 2000));
       const stillChallenged = await page
         .evaluate(() => {
           return document.body.textContent.includes(
@@ -454,26 +517,19 @@ async function captureCookies(page, fingerprint) {
             console.log("Max retries reached during challenge resolution");
             return { cookies: null, fingerprint };
           }
-          await page.waitForTimeout(CONFIG.RETRY_DELAY);
+          await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY));
           retryCount++;
           continue;
         }
       }
 
-      // Get context from page's browser context
-      const context = page.context();
-      if (!context) {
-        throw new Error("Cannot access browser context from page");
-      }
-
-      let cookies = await context.cookies().catch(() => []);
-
-      if (!cookies?.length) {
+      // Get cookies from page
+      let cookies = await page.cookies().catch(() => []);      if (!cookies?.length) {
         console.log(`Attempt ${retryCount + 1}: No cookies captured`);
         if (retryCount === MAX_RETRIES - 1) {
           return { cookies: null, fingerprint };
         }
-        await page.waitForTimeout(CONFIG.RETRY_DELAY);
+        await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY));
         retryCount++;
         continue;
       }
@@ -490,16 +546,14 @@ async function captureCookies(page, fingerprint) {
         (cookie) =>
           cookie.domain.includes("ticketmaster.com") ||
           cookie.domain.includes(".ticketmaster.com")
-      );
-
-      if (ticketmasterCookies.length < 3) {
+      );      if (ticketmasterCookies.length < 3) {
         console.log(
           `Attempt ${retryCount + 1}: Not enough Ticketmaster cookies`
         );
         if (retryCount === MAX_RETRIES - 1) {
           return { cookies: null, fingerprint };
         }
-        await page.waitForTimeout(CONFIG.RETRY_DELAY);
+        await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY));
         retryCount++;
         continue;
       }
@@ -513,11 +567,10 @@ async function captureCookies(page, fingerprint) {
           `Attempt ${
             retryCount + 1
           }: Cookie JSON too small (${lineCount} lines)`
-        );
-        if (retryCount === MAX_RETRIES - 1) {
+        );        if (retryCount === MAX_RETRIES - 1) {
           return { cookies: null, fingerprint };
         }
-        await page.waitForTimeout(CONFIG.RETRY_DELAY);
+        await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY));
         retryCount++;
         continue;
       }
@@ -532,7 +585,7 @@ async function captureCookies(page, fingerprint) {
       // Add cookies one at a time with error handling
       for (const cookie of cookies) {
         try {
-          await context.addCookies([cookie]);
+          await page.setCookie(cookie);
         } catch (error) {
           console.warn(`Error adding cookie ${cookie.name}:`, error.message);
         }
@@ -546,11 +599,10 @@ async function captureCookies(page, fingerprint) {
       console.error(
         `Error capturing cookies on attempt ${retryCount + 1}:`,
         error
-      );
-      if (retryCount === MAX_RETRIES - 1) {
+      );      if (retryCount === MAX_RETRIES - 1) {
         return { cookies: null, fingerprint };
       }
-      await page.waitForTimeout(CONFIG.RETRY_DELAY);
+      await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY));
       retryCount++;
     }
   }
@@ -682,12 +734,12 @@ async function refreshCookies(eventId, proxy = null) {
             };
           }
         }
-      }
-
-      // Create a promise that will be resolved/rejected based on timeout
+      }      // Create a promise that will be resolved/rejected based on timeout
       const refreshPromise = new Promise(async (resolve, reject) => {
         // Set up 2-minute timeout for browser restart
+        console.log(`Setting up ${CONFIG.BROWSER_RESTART_TIMEOUT / 1000}s timeout for browser restart...`);
         timeoutId = setTimeout(() => {
+          console.log(`Timeout triggered after ${CONFIG.BROWSER_RESTART_TIMEOUT / 1000} seconds`);
           reject(
             new Error(
               `Cookie refresh timeout after ${
@@ -701,9 +753,7 @@ async function refreshCookies(eventId, proxy = null) {
           // Initialize browser with improved error handling
           let initAttempts = 0;
           let initSuccess = false;
-          let initError = null;
-
-          while (initAttempts < 3 && !initSuccess) {
+          let initError = null;          while (initAttempts < 3 && !initSuccess) {
             try {
               const result = await initBrowser(currentProxy);
               if (!result || !result.context || !result.fingerprint) {
@@ -733,16 +783,32 @@ async function refreshCookies(eventId, proxy = null) {
           if (!initSuccess) {
             console.error("All browser initialization attempts failed");
             throw initError || new Error("Failed to initialize browser");
-          }
-
-          // Navigate to event page
+          }          // Navigate to event page
           const url = `https://www.ticketmaster.com/event/${currentEventId}`;
-          console.log(`Navigating to ${url}`);
-
-          await page.goto(url, {
-            waitUntil: "domcontentloaded",
-            timeout: CONFIG.PAGE_TIMEOUT,
-          });
+          console.log(`Navigating to ${url}`);          try {
+            await page.goto(url, {
+              waitUntil: "domcontentloaded",
+              timeout: CONFIG.PAGE_TIMEOUT,
+            });
+          } catch (navError) {
+            console.warn(`Navigation error: ${navError.message}`);
+            
+            // If it's a proxy auth error, this is a critical failure
+            if (navError.message.includes("ERR_INVALID_AUTH_CREDENTIALS")) {
+              throw new Error(`Proxy authentication failed during navigation: ${navError.message}`);
+            }
+            
+            // Try with a different wait condition
+            try {
+              await page.goto(url, {
+                waitUntil: "networkidle0",
+                timeout: CONFIG.PAGE_TIMEOUT,
+              });
+            } catch (secondNavError) {
+              console.error(`Second navigation attempt failed: ${secondNavError.message}`);
+              throw new Error(`Failed to navigate to event page: ${secondNavError.message}`);
+            }
+          }
 
           // Check if the page loaded properly
           const currentUrl = page.url();
@@ -755,10 +821,15 @@ async function refreshCookies(eventId, proxy = null) {
 
             // Try refreshing the page
             console.log("Attempting to reload the page...");
-            await page.reload({
-              waitUntil: "domcontentloaded",
-              timeout: CONFIG.PAGE_TIMEOUT,
-            });
+            try {
+              await page.reload({
+                waitUntil: "domcontentloaded",
+                timeout: CONFIG.PAGE_TIMEOUT,
+              });
+            } catch (reloadError) {
+              console.warn(`Reload failed: ${reloadError.message}`);
+              throw new Error(`Failed to load and reload event page: ${reloadError.message}`);
+            }
 
             const newUrl = page.url();
             const reloadSuccessful = newUrl.includes(
@@ -771,9 +842,7 @@ async function refreshCookies(eventId, proxy = null) {
             }
           }
 
-          console.log(`Successfully loaded page for event ${currentEventId}`);
-
-          // Check for Ticketmaster challenge
+          console.log(`Successfully loaded page for event ${currentEventId}`);          // Check for Ticketmaster challenge
           const isChallengePresent = await checkForTicketmasterChallenge(page);
           if (isChallengePresent) {
             console.warn(
@@ -783,20 +852,25 @@ async function refreshCookies(eventId, proxy = null) {
           }
 
           // Simulate human behavior
-          await simulateMobileInteractions(page);
+          try {
+            await simulateMobileInteractions(page);
+          } catch (behaviorError) {
+            console.warn(`Human behavior simulation failed: ${behaviorError.message}`);
+          }
 
           // Wait for cookies to be set
-          await page.waitForTimeout(2000);
-
-          // Capture cookies
+          await new Promise(resolve => setTimeout(resolve, 2000));          // Capture cookies
           const fingerprint = BrowserFingerprint.generate();
+          console.log(`Starting cookie capture with fingerprint generated...`);
           const { cookies } = await captureCookies(page, fingerprint);
 
           if (!cookies || cookies.length === 0) {
+            console.error("Cookie capture failed - no cookies returned");
             throw new Error("Failed to capture cookies");
           }
 
-          // Clear timeout and resolve with success
+          console.log(`Cookie capture successful - ${cookies.length} cookies captured`);          // Clear timeout and resolve with success
+          console.log(`Clearing timeout and resolving with success...`);
           clearTimeout(timeoutId);
 
           console.log(`\n=== COOKIE REFRESH SUCCESS ===`);
@@ -821,8 +895,8 @@ async function refreshCookies(eventId, proxy = null) {
             cookies,
             fingerprint,
             lastRefresh: Date.now(),
-          });
-        } catch (error) {
+          });        } catch (error) {
+          console.log(`Error in refresh promise, clearing timeout:`, error.message);
           clearTimeout(timeoutId);
           reject(error);
         }
@@ -857,9 +931,7 @@ async function refreshCookies(eventId, proxy = null) {
         console.log(`1. Closing existing browser`);
         console.log(`2. Getting new proxy`);
         console.log(`3. Getting new event ID`);
-        console.log(`4. Opening fresh browser instance`);
-
-        // Step 1: Force close existing browser to ensure clean restart
+        console.log(`4. Opening fresh browser instance`);        // Step 1: Force close existing browser to ensure clean restart
         try {
           if (browserInstance) {
             console.log(`Forcefully closing existing browser...`);
@@ -934,28 +1006,10 @@ async function refreshCookies(eventId, proxy = null) {
       console.log(
         `Waiting ${waitTime / 1000} seconds before retry ${retryCount + 1}...`
       );
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-    } finally {
-      // Close page and context but keep browser open for reuse
-      if (page) {
-        try {
-          await page
-            .close()
-            .catch((e) => console.error("Error closing page:", e));
-        } catch (e) {
-          console.error("Error closing page in finally block:", e);
-        }
-      }
-
-      if (localContext) {
-        try {
-          await localContext
-            .close()
-            .catch((e) => console.error("Error closing context:", e));
-        } catch (e) {
-          console.error("Error closing context in finally block:", e);
-        }
-      }
+      await new Promise((resolve) => setTimeout(resolve, waitTime));    } finally {
+      // Close page and context safely
+      await safeClosePage(page);
+      await safeCloseContext(localContext);
     }
   }
 
@@ -971,11 +1025,9 @@ async function generateAlternativeEventId(originalEventId) {
   try {
     console.log(
       `Searching for alternative event ID (original: ${originalEventId})...`
-    );
-
-    // Try to import Event model and get a different random event
+    );    // Try to import Event model and get a different random event
     try {
-      const { Event } = await import("./models/index.js");
+      const { Event } = await import("../models/eventModel.js");
 
       // Get multiple random active events, excluding the original
       const alternativeEvents = await Event.aggregate([
@@ -1002,100 +1054,61 @@ async function generateAlternativeEventId(originalEventId) {
           `✓ Found alternative event: ${alternativeId} (${
             selectedEvent.Event_Name || "Unknown Event"
           })`
-        );
-        return alternativeId;
+        );        return alternativeId;
       } else {
         console.warn(`No alternative events found in database`);
+        return originalEventId;
       }
     } catch (dbError) {
       console.warn(`Database query failed: ${dbError.message}`);
+      return originalEventId;
     }
-
-    // Fallback: Generate a variation of the original event ID
-    const timestamp = Date.now().toString().slice(-6);
-    const randomSuffix = Math.random().toString(36).substring(2, 6);
-    const alternativeId = originalEventId.replace(
-      /\d+$/,
-      timestamp + randomSuffix
-    );
-
-    console.log(`⚠ Using generated alternative event ID: ${alternativeId}`);
-    return alternativeId;
   } catch (error) {
     console.warn(`Failed to generate alternative event ID: ${error.message}`);
-    return originalEventId; // Fallback to original
+    return originalEventId;
   }
 }
 
 /**
  * Get an alternative proxy for retry attempts
- * This function integrates with the ProxyManager to get a fresh proxy
+ * This function integrates with the proxy list to get a fresh proxy
  */
 async function getAlternativeProxy(currentProxy) {
   try {
-    console.log(`Searching for alternative proxy...`);
+    console.log(`Searching for alternative proxy...`);    // Try to get a fresh proxy from the proxy management system
+    try {      const proxyData = await import("../proxy.js");
+      const proxies = proxyData.default.proxies;
 
-    // Try to get a fresh proxy from the proxy management system
-    try {
-      const { GetProxy } = await import("./helpers/proxy.js");
+      if (proxies && proxies.length > 0) {
+        // Filter out the current proxy if it exists
+        let availableProxies = proxies;
+        if (currentProxy && currentProxy.proxy) {
+          availableProxies = proxies.filter(p => p.proxy !== currentProxy.proxy);
+        }
 
-      // Get a new proxy from the proxy pool
-      const proxyData = await GetProxy();
+        // If we have alternative proxies, pick a random one
+        if (availableProxies.length > 0) {
+          const randomProxy = availableProxies[Math.floor(Math.random() * availableProxies.length)];
+          
+          // Parse proxy string to get host and port
+          const [host, port] = randomProxy.proxy.split(':');
+          
+          const newProxy = {
+            host: host,
+            port: port,
+            username: randomProxy.username,
+            password: randomProxy.password,
+            proxy: randomProxy.proxy,
+          };
 
-      if (proxyData && proxyData.proxy) {
-        const newProxy = proxyData.proxy;
-
-        // Make sure it's different from the current proxy
-        if (
-          currentProxy &&
-          newProxy.host === currentProxy.host &&
-          newProxy.port === currentProxy.port
-        ) {
-          console.log(`Got same proxy, trying to get another one...`);
-
-          // Try one more time to get a different proxy
-          const secondAttempt = await GetProxy();
-          if (secondAttempt && secondAttempt.proxy) {
-            const secondProxy = secondAttempt.proxy;
-            if (
-              secondProxy.host !== currentProxy.host ||
-              secondProxy.port !== currentProxy.port
-            ) {
-              console.log(
-                `✓ Found different proxy: ${secondProxy.host}:${secondProxy.port}`
-              );
-              return secondProxy;
-            }
-          }
-        } else {
-          console.log(
-            `✓ Found alternative proxy: ${newProxy.host}:${newProxy.port}`
-          );
+          console.log(`✓ Found alternative proxy: ${newProxy.host}:${newProxy.port}`);
           return newProxy;
+        } else {
+          console.log(`⚠ No alternative proxies available in proxy list`);
         }
       }
-    } catch (proxyError) {
-      console.warn(
-        `Failed to get proxy from ProxyManager: ${proxyError.message}`
-      );
-    }
-
-    // Fallback: Create a variation of the current proxy if available
-    if (currentProxy && currentProxy.host && currentProxy.port) {
-      console.log(`⚠ Creating proxy variation as fallback`);
-      const portVariation =
-        parseInt(currentProxy.port) + Math.floor(Math.random() * 100) + 1;
-
-      return {
-        host: currentProxy.host,
-        port: portVariation.toString(),
-        username: currentProxy.username,
-        password: currentProxy.password,
-        proxy: `${currentProxy.host}:${portVariation}`, // Add proxy string format
-      };
-    }
-
-    console.warn(`Could not generate alternative proxy`);
+    } catch (proxyError) {      console.warn(`Failed to get proxy from proxy list: ${proxyError.message}`);
+    }    console.warn(`Could not generate alternative proxy`);
     return null;
   } catch (error) {
     console.warn(`Failed to get alternative proxy: ${error.message}`);
@@ -1109,10 +1122,58 @@ async function getAlternativeProxy(currentProxy) {
 async function cleanup() {
   if (browser) {
     try {
-      await browser.close();
+      if (browser.isConnected()) {
+        await browser.close();
+      }
       browser = null;
     } catch (error) {
-      console.warn("Error closing browser:", error.message);
+      // Ignore common browser closure errors
+      if (!error.message.includes('Protocol error') && 
+          !error.message.includes('Connection closed') &&
+          !error.message.includes('Target closed')) {
+        console.warn("Error closing browser:", error.message);
+      }
+      browser = null; // Set to null regardless
+    }
+  }
+}
+
+/**
+ * Safely close a page, ignoring common closure errors
+ */
+async function safeClosePage(page) {
+  if (!page) return;
+  
+  try {
+    if (!page.isClosed()) {
+      await page.close();
+    }
+  } catch (error) {
+    // Ignore common page closure errors that happen when the page is already closed
+    if (!error.message.includes('Protocol error') && 
+        !error.message.includes('Connection closed') &&
+        !error.message.includes('Target closed') &&
+        !error.message.includes('Session closed')) {
+      console.warn("Error closing page:", error.message);
+    }
+  }
+}
+
+/**
+ * Safely close a browser context, ignoring common closure errors
+ */
+async function safeCloseContext(context) {
+  if (!context || !context.close) return;
+  
+  try {
+    await context.close();
+  } catch (error) {
+    // Ignore common context closure errors
+    if (!error.message.includes('Protocol error') && 
+        !error.message.includes('Connection closed') &&
+        !error.message.includes('Target closed') &&
+        !error.message.includes('Session closed')) {
+      console.warn("Error closing context:", error.message);
     }
   }
 }
@@ -1123,8 +1184,7 @@ export {
   refreshCookies,
   loadCookiesFromFile,
   saveCookiesToFile,
-  cleanup,
-  handleTicketmasterChallenge,
+  cleanup,  handleTicketmasterChallenge,
   checkForTicketmasterChallenge,
   enhancedFingerprint,
   getRandomLocation,
@@ -1132,4 +1192,6 @@ export {
   generateAlternativeEventId,
   getAlternativeProxy,
   simulateMobileInteractions,
+  safeClosePage,
+  safeCloseContext,
 };

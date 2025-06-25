@@ -2,12 +2,18 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { connectDB } from './config/database.js';
 import cookieRefreshRoutes from './routes/cookieRefreshRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 import { CookieRefreshService } from './services/CookieRefreshService.js';
 import { setCookieRefreshService } from './controllers/cookieRefreshController.js';
 import { logger } from './helpers/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Load environment variables
 dotenv.config();
@@ -46,8 +52,51 @@ app.use('*', (req, res) => {
 // Initialize service
 let cookieRefreshService;
 
+/**
+ * Ensure required directories exist
+ */
+async function ensureDirectories() {
+  const projectRoot = path.join(__dirname, '..');
+  const logsDir = path.join(projectRoot, 'logs');
+  const dataDir = path.join(projectRoot, 'data');
+  
+  try {
+    // Create logs directory
+    await fs.mkdir(logsDir, { recursive: true });
+    console.log(`✓ Ensured logs directory exists: ${logsDir}`);
+    
+    // Create data directory
+    await fs.mkdir(dataDir, { recursive: true });
+    console.log(`✓ Ensured data directory exists: ${dataDir}`);
+    
+    // Create initial data files if they don't exist
+    const cookiesFile = path.join(dataDir, 'cookies.json');
+    const sessionsFile = path.join(dataDir, 'sessions.json');
+    
+    try {
+      await fs.access(cookiesFile);
+    } catch {
+      await fs.writeFile(cookiesFile, '[]');
+      console.log(`✓ Created initial cookies.json file`);
+    }
+    
+    try {
+      await fs.access(sessionsFile);
+    } catch {
+      await fs.writeFile(sessionsFile, '[]');
+      console.log(`✓ Created initial sessions.json file`);
+    }
+    
+  } catch (error) {
+    console.error('Failed to create required directories:', error);
+    throw error;
+  }
+}
+
 async function startServer() {
   try {
+    // Ensure required directories exist first
+    await ensureDirectories();
     // Connect to database
     await connectDB();
     logger.info('Connected to MongoDB');

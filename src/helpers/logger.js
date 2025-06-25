@@ -12,8 +12,16 @@ class Logger {
   }
 
   ensureLogDirectory() {
-    if (!fs.existsSync(this.logDir)) {
-      fs.mkdirSync(this.logDir, { recursive: true });
+    try {
+      if (!fs.existsSync(this.logDir)) {
+        fs.mkdirSync(this.logDir, { recursive: true });
+        console.log(`Created logs directory at: ${this.logDir}`);
+      }
+    } catch (error) {
+      console.error(`Failed to create logs directory: ${error.message}`);
+      // Fallback to current directory
+      this.logDir = process.cwd();
+      console.log(`Using fallback log directory: ${this.logDir}`);
     }
   }
 
@@ -54,8 +62,15 @@ class Logger {
   }
 
   writeToFile(filename, message) {
-    const logFile = path.join(this.logDir, filename);
-    fs.appendFileSync(logFile, message + '\n');
+    try {
+      // Ensure directory exists before writing
+      this.ensureLogDirectory();
+      const logFile = path.join(this.logDir, filename);
+      fs.appendFileSync(logFile, message + '\n');
+    } catch (error) {
+      console.error(`Failed to write to log file ${filename}: ${error.message}`);
+      // Don't throw the error, just log it to console so the app doesn't crash
+    }
   }
 
   log(level, message, data = null) {

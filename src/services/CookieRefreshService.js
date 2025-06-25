@@ -1,5 +1,4 @@
-// Removed Playwright - now using enhanced browser-cookies service
-// Removed FingerprintGenerator - now using enhanced BrowserFingerprint service
+
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -203,9 +202,10 @@ export class CookieRefreshService {
       // Use the enhanced refreshCookies function from browser-cookies service
       const result = await refreshCookies(eventId, proxy);
       
-      if (result.success) {
+      // Check if we got valid results from refreshCookies
+      if (result && result.cookies) {
         // Save cookies using existing method
-        if (result.cookies && result.cookies.length > 0) {
+        if (result.cookies.length > 0) {
           await this.saveCookies(result.cookies);
         }
         
@@ -214,30 +214,31 @@ export class CookieRefreshService {
           cookies: result.cookies || [],
           fingerprint: result.fingerprint,
           eventId,
-          proxy: result.proxy,
+          proxy: proxy,
           timestamp: Date.now(),
           userAgent: result.fingerprint?.userAgent,
           viewport: result.fingerprint?.viewport,
-          attempts: result.attempts,
+          lastRefresh: result.lastRefresh,
           enhanced: true
         };
         
         await this.saveSession(sessionData);
         
-        logger.info(`Enhanced cookie refresh completed: ${result.cookies ? result.cookies.length : 0} cookies captured in ${result.attempts} attempts`);
+        logger.info(`Enhanced cookie refresh completed: ${result.cookies.length} cookies captured`);
         
         return {
-           cookieCount: result.cookies ? result.cookies.length : 0,
-           retryCount: result.attempts || 0,
+           cookieCount: result.cookies.length,
+           retryCount: 0, // refreshCookies handles retries internally
            fingerprint: result.fingerprint,
            userAgent: result.fingerprint?.userAgent,
            viewport: result.fingerprint?.viewport,
-           proxy: result.proxy,
+           proxy: proxy,
            enhanced: true,
-           cookies: result.cookies
+           cookies: result.cookies,
+           lastRefresh: result.lastRefresh
          };
        } else {
-         throw new Error(result.error || 'Enhanced cookie refresh failed');
+         throw new Error('Enhanced cookie refresh failed - no valid cookies returned');
        }
        
     } catch (error) {
@@ -272,20 +273,11 @@ export class CookieRefreshService {
       return cookies;
     } catch (error) {
       logger.error('Failed to read cookies using enhanced service:', error);
-      // Fallback to original method
-      try {
-        const cookiesData = await fs.readFile(this.cookiesPath, 'utf8');
-        const fallbackCookies = JSON.parse(cookiesData);
-        logger.debug(`Retrieved ${fallbackCookies.length} cookies from fallback storage`);
-        return fallbackCookies;
-      } catch (fallbackError) {
-        if (fallbackError.code === 'ENOENT') {
-          logger.warn('Cookies file not found, returning empty array');
-          return [];
-        }
-        logger.error('Failed to read cookies from fallback:', fallbackError);
-        throw fallbackError;
+      if (error.code === 'ENOENT') {
+        logger.warn('Cookies file not found, returning empty array');
+        return [];
       }
+      throw error;
     }
   }
 
@@ -384,22 +376,11 @@ export class CookieRefreshService {
         return randomEvents[0].Event_ID;
       }
       
-      // Fallback to any event if no non-skipped events found
-      const fallbackEvents = await Event.aggregate([
-        { $sample: { size: 1 } }
-      ]);
-      
-      if (fallbackEvents && fallbackEvents.length > 0) {
-        logger.warn(`No non-skipped events found, using fallback event: ${fallbackEvents[0].Event_ID}`);
-        return fallbackEvents[0].Event_ID;
-      }
-      
-      // Final fallback to environment variable or hardcoded value
-      logger.warn('No events found in database, using default event ID');
-      return process.env.DEFAULT_EVENT_ID || 'Z7r9jZ1AdqV';
+      // No events found - throw error instead of using fallback
+      throw new Error('No events found in database');
     } catch (error) {
       logger.error('Error fetching random event ID from database:', error);
-      return process.env.DEFAULT_EVENT_ID || 'Z7r9jZ1AdqV';
+      throw error;
     }
   }
 
