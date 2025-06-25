@@ -199,13 +199,15 @@ async function initBrowser(proxy) {
   try {
     // Get randomized human-like properties
     const location = getRandomLocation();    // For persisting browser sessions, use same browser if possible
-    if (!browser || !browser.isConnected()) {// Launch options
+    if (!browser || !browser.isConnected()) {      // Launch options
       const launchOptions = {
         headless: 'new', // Set to false for debugging, true for production
         args: [
           "--disable-blink-features=AutomationControlled",
           "--disable-features=IsolateOrigins,site-per-process",
           "--disable-web-security",
+          "--disable-features=VizDisplayCompositor",
+          "--disable-ipc-flooding-protection",
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--no-first-run",
@@ -217,10 +219,28 @@ async function initBrowser(proxy) {
           "--disable-background-timer-throttling",
           "--disable-backgrounding-occluded-windows",
           "--disable-renderer-backgrounding",
+          "--disable-extensions",
+          "--disable-plugins",
+          "--disable-default-apps",
+          "--disable-hang-monitor",
+          "--disable-prompt-on-repost",
+          "--disable-sync",
+          "--disable-translate",
+          "--metrics-recording-only",
+          "--no-experiments",
+          "--allow-running-insecure-content",
+          "--ignore-certificate-errors",
+          "--ignore-ssl-errors",
+          "--ignore-certificate-errors-spki-list",
+          "--disable-cors-policy",
+          "--allow-cross-origin-auth-prompt",
+          "--disable-site-isolation-trials",
+          "--disable-features=TranslateUI"
         ],
         defaultViewport: null,
         timeout: 60000,
-      };      if (proxy && typeof proxy === "object" && (proxy.proxy || (proxy.host && proxy.port))) {
+        ignoreDefaultArgs: ['--enable-automation'],
+      };if (proxy && typeof proxy === "object" && (proxy.proxy || (proxy.host && proxy.port))) {
         try {
           let hostname, port;
           
@@ -269,7 +289,55 @@ async function initBrowser(proxy) {
       // Launch browser
       browser = await puppeteer.launch(launchOptions);
     }    // Create new page with enhanced fingerprinting
-    const page = await browser.newPage();    // Configure proxy authentication if proxy credentials are provided
+    const page = await browser.newPage();
+
+    // Enable request interception for CORS handling
+    await page.setRequestInterception(true);
+    
+    page.on('request', (request) => {
+      const headers = request.headers();
+      
+      // Add CORS headers to requests
+      headers['Access-Control-Allow-Origin'] = '*';
+      headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+      headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With';
+      headers['Access-Control-Allow-Credentials'] = 'true';
+      
+      // Continue with modified headers
+      request.continue({ headers });
+    });
+
+    page.on('response', async (response) => {
+      try {
+        // Add CORS headers to responses
+        const headers = response.headers();
+        if (!headers['access-control-allow-origin']) {
+          await page.evaluate(() => {
+            // Inject CORS headers into response handling
+            const originalFetch = window.fetch;
+            window.fetch = function(...args) {
+              return originalFetch.apply(this, args).then(response => {
+                // Create a new response with CORS headers
+                const newResponse = new Response(response.body, {
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: {
+                    ...response.headers,
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+                    'Access-Control-Allow-Credentials': 'true'
+                  }
+                });
+                return newResponse;
+              });
+            };
+          });
+        }
+      } catch (error) {
+        // Ignore errors in response handling
+      }
+    });// Configure proxy authentication if proxy credentials are provided
     if (proxy && proxy.username && proxy.password) {
       console.log(`Setting up proxy authentication for user: ${proxy.username}`);
       try {
@@ -297,9 +365,7 @@ async function initBrowser(proxy) {
       isMobile: true,
       hasTouch: true,
       isLandscape: false,
-    });
-
-    // Set extra HTTP headers
+    });    // Set extra HTTP headers
     await page.setExtraHTTPHeaders({
       Accept:
         "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
@@ -311,7 +377,10 @@ async function initBrowser(proxy) {
       "Sec-Fetch-User": "?1",
       DNT: Math.random() > 0.5 ? "1" : "0",
       "Upgrade-Insecure-Requests": "1",
-      Pragma: "no-cache",
+      "Cache-Control": "no-cache",
+      "Pragma": "no-cache",
+      "Origin": "https://www.ticketmaster.com",
+      "Referer": "https://www.ticketmaster.com/"
     });
 
     // Set geolocation
@@ -336,7 +405,7 @@ async function initBrowser(proxy) {
       "notifications",
       "microphone",
       "camera",
-    ]);    // Add script to override webdriver detection
+    ]);    // Add script to override webdriver detection and CORS policies
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', {
         get: () => undefined,
@@ -346,7 +415,39 @@ async function initBrowser(proxy) {
       delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
       delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
       delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-    });    // Add waitForTimeout method to page if it doesn't exist
+      
+      // Override CORS policies
+      const originalFetch = window.fetch;
+      window.fetch = function(...args) {
+        const [resource, config] = args;
+        if (config) {
+          config.mode = config.mode || 'cors';
+          config.credentials = config.credentials || 'include';
+        }
+        return originalFetch.apply(this, args);
+      };
+      
+      // Override XMLHttpRequest for CORS
+      const originalXHR = window.XMLHttpRequest;
+      window.XMLHttpRequest = function() {
+        const xhr = new originalXHR();
+        const originalOpen = xhr.open;
+        xhr.open = function(method, url, async, user, password) {
+          const result = originalOpen.apply(this, arguments);
+          // Set CORS headers
+          this.setRequestHeader = this.setRequestHeader || function() {};
+          return result;
+        };
+        return xhr;
+      };
+      
+      // Override document.domain for cross-origin access
+      try {
+        document.domain = 'ticketmaster.com';
+      } catch (e) {
+        // Ignore errors if domain cannot be set
+      }
+    });// Add waitForTimeout method to page if it doesn't exist
     if (!page.waitForTimeout) {
       page.waitForTimeout = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     }
@@ -785,7 +886,18 @@ async function refreshCookies(eventId, proxy = null) {
             throw initError || new Error("Failed to initialize browser");
           }          // Navigate to event page
           const url = `https://www.ticketmaster.com/event/${currentEventId}`;
-          console.log(`Navigating to ${url}`);          try {
+          console.log(`Navigating to ${url}`);
+
+          try {
+            // Set additional headers before navigation
+            await page.setExtraHTTPHeaders({
+              ...page._extraHTTPHeaders,
+              'Sec-Fetch-Site': 'same-origin',
+              'Sec-Fetch-Mode': 'navigate',
+              'Sec-Fetch-User': '?1',
+              'Sec-Fetch-Dest': 'document'
+            });
+
             await page.goto(url, {
               waitUntil: "domcontentloaded",
               timeout: CONFIG.PAGE_TIMEOUT,
@@ -793,20 +905,35 @@ async function refreshCookies(eventId, proxy = null) {
           } catch (navError) {
             console.warn(`Navigation error: ${navError.message}`);
             
-            // If it's a proxy auth error, this is a critical failure
+            // If it's a CORS or proxy auth error, this is a critical failure
             if (navError.message.includes("ERR_INVALID_AUTH_CREDENTIALS")) {
               throw new Error(`Proxy authentication failed during navigation: ${navError.message}`);
             }
             
-            // Try with a different wait condition
-            try {
-              await page.goto(url, {
-                waitUntil: "networkidle0",
-                timeout: CONFIG.PAGE_TIMEOUT,
-              });
-            } catch (secondNavError) {
-              console.error(`Second navigation attempt failed: ${secondNavError.message}`);
-              throw new Error(`Failed to navigate to event page: ${secondNavError.message}`);
+            if (navError.message.includes("CORS") || navError.message.includes("cross-origin")) {
+              console.log("CORS error detected, trying alternative navigation...");
+              
+              // Try alternative navigation with different security settings
+              try {
+                await page.goto(url, {
+                  waitUntil: "networkidle0",
+                  timeout: CONFIG.PAGE_TIMEOUT,
+                });
+              } catch (corsError) {
+                console.error(`CORS navigation failed: ${corsError.message}`);
+                throw new Error(`Failed to navigate due to CORS issues: ${corsError.message}`);
+              }
+            } else {
+              // Try with a different wait condition
+              try {
+                await page.goto(url, {
+                  waitUntil: "networkidle0",
+                  timeout: CONFIG.PAGE_TIMEOUT,
+                });
+              } catch (secondNavError) {
+                console.error(`Second navigation attempt failed: ${secondNavError.message}`);
+                throw new Error(`Failed to navigate to event page: ${secondNavError.message}`);
+              }
             }
           }
 

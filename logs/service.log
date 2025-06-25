@@ -9,3 +9,14 @@
 {"timestamp":"2025-06-25T20:28:14.735Z","level":"INFO","message":"API docs: http://localhost:3000/api/cookie-refresh"}
 {"timestamp":"2025-06-25T20:28:14.748Z","level":"DEBUG","message":"Data directory exists"}
 {"timestamp":"2025-06-25T20:28:18.588Z","level":"DEBUG","message":"Retrieved 31 cookies from enhanced storage"}
+{"timestamp":"2025-06-25T20:34:14.852Z","level":"INFO","message":"Scheduled refresh is due, starting refresh..."}
+{"timestamp":"2025-06-25T20:34:14.966Z","level":"INFO","message":"Selected random event ID: 2000616BD5691C75"}
+{"timestamp":"2025-06-25T20:34:14.969Z","level":"INFO","message":"Selected random proxy: 139.171.173.222:8537"}
+{"timestamp":"2025-06-25T20:34:15.148Z","level":"INFO","message":"Started tracking cookie refresh operation: 068757b4-34ab-41e3-ae5f-a55b4d59224b for event 2000616BD5691C75"}
+{"timestamp":"2025-06-25T20:34:15.149Z","level":"INFO","message":"Starting cookie refresh for event 2000616BD5691C75 with proxy 139.171.173.222:8537"}
+{"timestamp":"2025-06-25T20:34:15.152Z","level":"INFO","message":"Starting enhanced cookie refresh for event: 2000616BD5691C75"}
+{"timestamp":"2025-06-25T20:34:15.169Z","level":"DEBUG","message":"Saved 31 cookies to D:\\nodejs\\cookie-refresh-service\\data\\cookies.json"}
+{"timestamp":"2025-06-25T20:34:15.175Z","level":"DEBUG","message":"Saved session data"}
+{"timestamp":"2025-06-25T20:34:15.176Z","level":"INFO","message":"Enhanced cookie refresh completed: 31 cookies captured"}
+{"timestamp":"2025-06-25T20:34:15.401Z","level":"INFO","message":"Cookie refresh completed successfully: 068757b4-34ab-41e3-ae5f-a55b4d59224b with 31 cookies"}
+{"timestamp":"2025-06-25T20:34:15.403Z","level":"INFO","message":"Cookie refresh completed successfully: 31 cookies"}
