@@ -1,0 +1,40 @@
+{
+  "name": "cookie-refresh-service",
+  "version": "1.0.0",
+  "description": "Microservice for handling cookie refresh operations",
+  "main": "src/app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "cookies",
+    "refresh",
+    "microservice",
+    "playwright",
+    "scraping"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.21.2",
+    "mongoose": "^8.10.0",
+    "dotenv": "^16.5.0",
+    "cors": "^2.8.5",
+    "morgan": "^1.10.0",
+    "moment": "^2.30.1",
+    "axios": "^1.7.9",
+    "@playwright/test": "^1.49.1",
+    "playwright": "^1.49.1",
+    "browser-headers": "^0.4.1",
+    "delay-async": "^1.2.0",
+    "nanoid": "^5.1.5",
+    "p-limit": "^6.2.0",
+    "p-retry": "^6.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7"
+  }
+}
