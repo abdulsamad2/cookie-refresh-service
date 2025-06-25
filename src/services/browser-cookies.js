@@ -11,10 +11,10 @@ const iphone13 = devices["iPhone 13"];
 const COOKIES_FILE = "cookies.json";
 const CONFIG = {
   COOKIE_REFRESH_INTERVAL: 30 * 60 * 1000, // 20 minutes (standardized timing)
-  PAGE_TIMEOUT: 45000,
+  PAGE_TIMEOUT: 120000, // 2 minutes timeout for page operations
   MAX_RETRIES: 5,
   RETRY_DELAY: 10000,
-  CHALLENGE_TIMEOUT: 10000,
+  CHALLENGE_TIMEOUT: 30000, // 30 seconds timeout for challenge detection
   COOKIE_REFRESH_TIMEOUT: 1 * 60 * 1000, // 2 minutes timeout for cookie refresh
   MAX_REFRESH_RETRIES: 10, // Increased retries for enhanced retry system
   BROWSER_RESTART_TIMEOUT: 1 * 60 * 1000, // 2 minutes - when to restart browser
@@ -215,7 +215,7 @@ async function initBrowser(proxy) {
           "--disable-infobars",
           "--disable-notifications",
         ],
-        timeout: 60000,
+        timeout: 180000, // 2 minutes timeout for browser launch
       };
 
       if (proxy && typeof proxy === "object" && proxy.proxy) {
