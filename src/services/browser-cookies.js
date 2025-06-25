@@ -2,6 +2,7 @@ import { chromium, devices } from "playwright";
 import fs from "fs/promises";
 import path from "path";
 import { BrowserFingerprint } from "./browserFingerprint.js";
+import { simulateHumanBehavior, DEFAULT_CONFIG } from "./humanBehavior.js";
 
 // Device settings
 const iphone13 = devices["iPhone 13"];
@@ -132,8 +133,11 @@ function enhancedFingerprint() {
 }
 
 /**
- * Simulate various mobile interactions to appear more human-like
+ * Legacy mobile interactions function - DEPRECATED
+ * Replaced with sophisticated humanBehavior.js module
+ * Keeping for reference but no longer used
  */
+/*
 async function simulateMobileInteractions(page) {
   try {
     // Get viewport size
@@ -183,6 +187,7 @@ async function simulateMobileInteractions(page) {
     console.warn("Error during mobile interaction simulation:", error.message);
   }
 }
+*/
 
 /**
  * Initialize the browser with enhanced fingerprinting
@@ -198,7 +203,7 @@ async function initBrowser(proxy) {
     if (!browser || !browser.isConnected()) {
       // Launch options
       const launchOptions = {
-        headless: true,
+        headless: false,
         args: [
           "--disable-blink-features=AutomationControlled",
           "--disable-features=IsolateOrigins,site-per-process",
@@ -295,7 +300,14 @@ async function initBrowser(proxy) {
     // Create a new page and simulate human behavior
     const page = await context.newPage();
     await page.waitForTimeout(1000 + Math.random() * 2000);
-    await simulateMobileInteractions(page);
+    
+    // Use sophisticated human behavior simulation
+    await simulateHumanBehavior(page, {
+      ...DEFAULT_CONFIG,
+      enableAdvancedInteractions: true,
+      sessionVariabilityFactor: 0.3,
+      simulateNetworkDelay: true
+    });
 
     return { context, fingerprint: enhancedFingerprint(), page, browser };
   } catch (error) {
@@ -782,8 +794,17 @@ async function refreshCookies(eventId, proxy = null) {
             await handleTicketmasterChallenge(page);
           }
 
-          // Simulate human behavior
-          await simulateMobileInteractions(page);
+          // Simulate human behavior with Ticketmaster-specific configuration
+          await simulateHumanBehavior(page, {
+            ...DEFAULT_CONFIG,
+            initialDelay: 3000,
+            initialDelayVariance: 5000,
+            minMouseMoves: 5,
+            maxMouseMoves: 12,
+            enableAdvancedInteractions: !isChallengePresent, // Avoid interactions during challenges
+            sessionVariabilityFactor: 0.4,
+            simulateNetworkDelay: true
+          });
 
           // Wait for cookies to be set
           await page.waitForTimeout(2000);
@@ -975,7 +996,7 @@ async function generateAlternativeEventId(originalEventId) {
 
     // Try to import Event model and get a different random event
     try {
-      const { Event } = await import("./models/index.js");
+      const { Event } = await import("../models/eventModel.js");
 
       // Get multiple random active events, excluding the original
       const alternativeEvents = await Event.aggregate([
@@ -1037,7 +1058,7 @@ async function getAlternativeProxy(currentProxy) {
 
     // Try to get a fresh proxy from the proxy management system
     try {
-      const { GetProxy } = await import("./helpers/proxy.js");
+      const { GetProxy } = await import("../proxy.js");
 
       // Get a new proxy from the proxy pool
       const proxyData = await GetProxy();
@@ -1131,5 +1152,4 @@ export {
   getRealisticIphoneUserAgent,
   generateAlternativeEventId,
   getAlternativeProxy,
-  simulateMobileInteractions,
 };
